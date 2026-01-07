@@ -1,9 +1,16 @@
 import express, { Request, Response } from 'express';
 import twilio from 'twilio';
+import { Redis } from '@upstash/redis';
 import { getRandomRiddle, getRiddleByIndex, getRiddleIndex } from './riddles';
 
 const app = express();
 const port = process.env.PORT || 3000;
+
+// Initialize Redis
+const redis = new Redis({
+  url: process.env.UPSTASH_REDIS_REST_URL!,
+  token: process.env.UPSTASH_REDIS_REST_TOKEN!,
+});
 
 app.use(express.urlencoded({ extended: false }));
 
@@ -11,19 +18,42 @@ app.get('/', (_req: Request, res: Response) => {
   res.send('Riddle Phone is running. Call the number to hear your fate.');
 });
 
+// Get creepy greeting based on call count
+function getGreeting(callCount: number): string {
+  if (callCount === 1) {
+    return "Welcome, caller. You have reached the Riddle Line.";
+  } else if (callCount === 2) {
+    return "You again. I wondered if you would return.";
+  } else if (callCount === 3) {
+    return "Three times now. You are becoming predictable.";
+  } else if (callCount === 4) {
+    return "Back so soon? The riddles have their hooks in you.";
+  } else if (callCount === 5) {
+    return "Five calls. Most people stop at two. But you are not most people, are you?";
+  } else if (callCount <= 10) {
+    return `Call number ${callCount}. You cannot stay away. Perhaps the riddles are not the only thing haunting you.`;
+  } else {
+    return `${callCount} times you have called. I am starting to worry about you, caller. Or perhaps... you should worry about me.`;
+  }
+}
+
 // Initial call - plays riddle and waits for input
-app.post('/voice', (_req: Request, res: Response) => {
+app.post('/voice', async (req: Request, res: Response) => {
+  const callerNumber = req.body.From || 'unknown';
+
+  // Increment call count
+  const callCount = await redis.incr(`calls:${callerNumber}`);
+
   const riddle = getRandomRiddle();
   const riddleIndex = getRiddleIndex(riddle);
   const VoiceResponse = twilio.twiml.VoiceResponse;
   const twiml = new VoiceResponse();
 
-  // Eerie greeting
-  twiml.say(
-    { voice: 'Polly.Matthew' },
-    'Welcome, caller. You have reached the Riddle Line.'
-  );
+  // Personalized creepy greeting
+  const greeting = getGreeting(callCount);
+  twiml.say({ voice: 'Polly.Matthew' }, greeting);
   twiml.pause({ length: 1 });
+
   twiml.say(
     { voice: 'Polly.Matthew' },
     'Listen carefully. I will only say this once.'
